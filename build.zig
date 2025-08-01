@@ -1,12 +1,7 @@
 const std = @import("std");
 const Build = std.Build;
 
-fn project_root(comptime path: []const u8) []const u8 {
-    const root = std.fs.path.dirname(@src().file) orelse unreachable;
-    return std.fmt.comptimePrint("{s}/{s}", .{ root, path });
-}
-
-fn define_from_bool(val: bool) ?u1 {
+fn defineFromBool(val: bool) ?u1 {
     return if (val) 1 else null;
 }
 
@@ -16,42 +11,44 @@ pub fn build(b: *Build) void {
     const system_libudev = b.option(
         bool,
         "system-libudev",
-        "link with system libudev on linux",
+        "link with system libudev on linux (default: true)",
     ) orelse true;
 
-    const libusb = create_libusb(b, target, optimize, system_libudev);
+    const libusb = createLibusb(b, target, optimize, system_libudev);
     b.installArtifact(libusb);
 
     const build_all = b.step("all", "build libusb for all targets");
     for (targets(b)) |t| {
-        const lib = create_libusb(b, t, optimize, system_libudev);
+        const lib = createLibusb(b, t, optimize, system_libudev);
         build_all.dependOn(&lib.step);
     }
 }
 
-fn create_libusb(
+fn createLibusb(
     b: *Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     system_libudev: bool,
 ) *Build.Step.Compile {
     const is_posix =
-        target.result.isDarwin() or
+        target.result.isDarwinLibC() or
         target.result.os.tag == .linux or
         target.result.os.tag == .openbsd;
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "usb",
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
     });
     lib.addCSourceFiles(.{ .files = src });
 
     if (is_posix)
         lib.addCSourceFiles(.{ .files = posix_platform_src });
 
-    if (target.result.isDarwin()) {
+    if (target.result.isDarwinLibC()) {
         lib.addCSourceFiles(.{ .files = darwin_src });
         lib.linkFramework("CoreFoundation");
         lib.linkFramework("IOKit");
@@ -79,7 +76,7 @@ fn create_libusb(
     lib.installHeader(b.path("libusb/libusb.h"), "libusb.h");
 
     // config header
-    if (target.result.isDarwin()) {
+    if (target.result.isDarwinLibC()) {
         lib.addIncludePath(b.path("Xcode"));
     } else if (target.result.abi == .msvc) {
         lib.addIncludePath(b.path("msvc"));
@@ -87,13 +84,13 @@ fn create_libusb(
         lib.addIncludePath(b.path("android"));
     } else {
         const config_h = b.addConfigHeader(.{ .style = .{
-            .autoconf = b.path("config.h.in"),
+            .autoconf_undef = b.path("config.h.in"),
         } }, .{
             .DEFAULT_VISIBILITY = .@"__attribute__ ((visibility (\"default\")))",
-            .ENABLE_DEBUG_LOGGING = define_from_bool(optimize == .Debug),
+            .ENABLE_DEBUG_LOGGING = defineFromBool(optimize == .Debug),
             .ENABLE_LOGGING = 1,
             .HAVE_ASM_TYPES_H = null,
-            .HAVE_CLOCK_GETTIME = define_from_bool(!(target.result.os.tag == .windows)),
+            .HAVE_CLOCK_GETTIME = defineFromBool(!(target.result.os.tag == .windows)),
             .HAVE_DECL_EFD_CLOEXEC = null,
             .HAVE_DECL_EFD_NONBLOCK = null,
             .HAVE_DECL_TFD_CLOEXEC = null,
@@ -101,8 +98,8 @@ fn create_libusb(
             .HAVE_DLFCN_H = null,
             .HAVE_EVENTFD = null,
             .HAVE_INTTYPES_H = null,
-            .HAVE_IOKIT_USB_IOUSBHOSTFAMILYDEFINITIONS_H = define_from_bool(target.result.isDarwin()),
-            .HAVE_LIBUDEV = define_from_bool(system_libudev),
+            .HAVE_IOKIT_USB_IOUSBHOSTFAMILYDEFINITIONS_H = defineFromBool(target.result.isDarwinLibC()),
+            .HAVE_LIBUDEV = defineFromBool(system_libudev),
             .HAVE_NFDS_T = null,
             .HAVE_PIPE2 = null,
             .HAVE_PTHREAD_CONDATTR_SETCLOCK = null,
@@ -114,7 +111,7 @@ fn create_libusb(
             .HAVE_STRINGS_H = 1,
             .HAVE_STRING_H = 1,
             .HAVE_STRUCT_TIMESPEC = 1,
-            .HAVE_SYSLOG = define_from_bool(is_posix),
+            .HAVE_SYSLOG = defineFromBool(is_posix),
             .HAVE_SYS_STAT_H = 1,
             .HAVE_SYS_TIME_H = 1,
             .HAVE_SYS_TYPES_H = 1,
@@ -128,8 +125,8 @@ fn create_libusb(
             .PACKAGE_TARNAME = "libusb-1.0",
             .PACKAGE_URL = "http://libusb.info",
             .PACKAGE_VERSION = "1.0.26",
-            .PLATFORM_POSIX = define_from_bool(is_posix),
-            .PLATFORM_WINDOWS = define_from_bool(target.result.os.tag == .windows),
+            .PLATFORM_POSIX = defineFromBool(is_posix),
+            .PLATFORM_WINDOWS = defineFromBool(target.result.os.tag == .windows),
             .STDC_HEADERS = 1,
             .UMOCKDEV_HOTPLUG = null,
             .USE_SYSTEM_LOGGING_FACILITY = null,

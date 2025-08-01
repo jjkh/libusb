@@ -1,6 +1,7 @@
 .{
-    .name = "libusb",
+    .name = .libusb,
     .version = "1.0.26",
+    .minimum_zig_version = "0.14.1",
     .paths = .{
         "README",
         "COPYING",
@@ -12,4 +13,5 @@
         "android",
         "msvc",
     },
+    .fingerprint = 0x3e6dc4cc5ad3d9a8,
 }
