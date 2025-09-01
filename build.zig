@@ -8,6 +8,7 @@ fn defineFromBool(val: bool) ?u1 {
 pub fn build(b: *Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
+
     const system_libudev = b.option(
         bool,
         "system-libudev",
@@ -30,6 +31,10 @@ fn createLibusb(
     optimize: std.builtin.OptimizeMode,
     system_libudev: bool,
 ) *Build.Step.Compile {
+    const upstream = b.dependency("libusb", .{});
+    const libusb = upstream.path("libusb");
+    const libusb_os = libusb.path(b, "os");
+
     const is_posix =
         target.result.isDarwinLibC() or
         target.result.os.tag == .linux or
@@ -43,68 +48,65 @@ fn createLibusb(
             .link_libc = true,
         }),
     });
-    lib.addCSourceFiles(.{ .files = src });
+    lib.addCSourceFiles(.{
+        .files = src,
+        .root = libusb,
+    });
 
     if (is_posix)
-        lib.addCSourceFiles(.{ .files = posix_platform_src });
+        lib.addCSourceFiles(.{
+            .files = posix_platform_src,
+            .root = libusb_os,
+        });
 
     if (target.result.isDarwinLibC()) {
-        lib.addCSourceFiles(.{ .files = darwin_src });
+        lib.addCSourceFiles(.{
+            .files = darwin_src,
+            .root = libusb_os,
+        });
         lib.linkFramework("CoreFoundation");
         lib.linkFramework("IOKit");
         lib.linkFramework("Security");
     } else if (target.result.os.tag == .linux) {
-        lib.addCSourceFiles(.{ .files = linux_src });
+        lib.addCSourceFiles(.{ .files = linux_src, .root = libusb_os });
         if (system_libudev) {
-            lib.addCSourceFiles(.{ .files = linux_udev_src });
+            lib.addCSourceFiles(.{ .files = linux_udev_src, .root = libusb_os });
             lib.linkSystemLibrary("udev");
         }
     } else if (target.result.os.tag == .windows) {
-        lib.addCSourceFiles(.{ .files = windows_src });
-        lib.addCSourceFiles(.{ .files = windows_platform_src });
+        lib.addCSourceFiles(.{ .files = windows_src, .root = libusb_os });
+        lib.addCSourceFiles(.{ .files = windows_platform_src, .root = libusb_os });
     } else if (target.result.os.tag == .netbsd) {
-        lib.addCSourceFiles(.{ .files = netbsd_src });
+        lib.addCSourceFiles(.{ .files = netbsd_src, .root = libusb_os });
     } else if (target.result.os.tag == .openbsd) {
-        lib.addCSourceFiles(.{ .files = openbsd_src });
+        lib.addCSourceFiles(.{ .files = openbsd_src, .root = libusb_os });
     } else if (target.result.os.tag == .haiku) {
-        lib.addCSourceFiles(.{ .files = haiku_src });
+        lib.addCSourceFiles(.{ .files = haiku_src, .root = libusb_os });
     } else if (target.result.os.tag == .solaris) {
-        lib.addCSourceFiles(.{ .files = sunos_src });
+        lib.addCSourceFiles(.{ .files = sunos_src, .root = libusb_os });
     } else unreachable;
 
-    lib.addIncludePath(b.path("libusb"));
-    lib.installHeader(b.path("libusb/libusb.h"), "libusb.h");
+    lib.addIncludePath(libusb);
+    lib.installHeader(libusb.path(b, "libusb.h"), "libusb.h");
 
     // config header
     if (target.result.isDarwinLibC()) {
-        lib.addIncludePath(b.path("Xcode"));
+        lib.addIncludePath(libusb.path(b, "Xcode"));
     } else if (target.result.abi == .msvc) {
-        lib.addIncludePath(b.path("msvc"));
+        lib.addIncludePath(libusb.path(b, "msvc"));
     } else if (target.result.abi == .android) {
-        lib.addIncludePath(b.path("android"));
+        lib.addIncludePath(libusb.path(b, "android"));
     } else {
-        const config_h = b.addConfigHeader(.{ .style = .{
-            .autoconf_undef = b.path("config.h.in"),
-        } }, .{
+        const config_h = b.addConfigHeader(.{
+            .style = .blank,
+            .include_path = "config.h",
+        }, .{
             .DEFAULT_VISIBILITY = .@"__attribute__ ((visibility (\"default\")))",
             .ENABLE_DEBUG_LOGGING = defineFromBool(optimize == .Debug),
             .ENABLE_LOGGING = 1,
-            .HAVE_ASM_TYPES_H = null,
             .HAVE_CLOCK_GETTIME = defineFromBool(!(target.result.os.tag == .windows)),
-            .HAVE_DECL_EFD_CLOEXEC = null,
-            .HAVE_DECL_EFD_NONBLOCK = null,
-            .HAVE_DECL_TFD_CLOEXEC = null,
-            .HAVE_DECL_TFD_NONBLOCK = null,
-            .HAVE_DLFCN_H = null,
-            .HAVE_EVENTFD = null,
-            .HAVE_INTTYPES_H = null,
             .HAVE_IOKIT_USB_IOUSBHOSTFAMILYDEFINITIONS_H = defineFromBool(target.result.isDarwinLibC()),
             .HAVE_LIBUDEV = defineFromBool(system_libudev),
-            .HAVE_NFDS_T = null,
-            .HAVE_PIPE2 = null,
-            .HAVE_PTHREAD_CONDATTR_SETCLOCK = null,
-            .HAVE_PTHREAD_SETNAME_NP = null,
-            .HAVE_PTHREAD_THREADID_NP = null,
             .HAVE_STDINT_H = 1,
             .HAVE_STDIO_H = 1,
             .HAVE_STDLIB_H = 1,
@@ -115,92 +117,86 @@ fn createLibusb(
             .HAVE_SYS_STAT_H = 1,
             .HAVE_SYS_TIME_H = 1,
             .HAVE_SYS_TYPES_H = 1,
-            .HAVE_TIMERFD = null,
             .HAVE_UNISTD_H = 1,
-            .LT_OBJDIR = null,
             .PACKAGE = "libusb-1.0",
             .PACKAGE_BUGREPORT = "libusb-devel@lists.sourceforge.net",
             .PACKAGE_NAME = "libusb-1.0",
-            .PACKAGE_STRING = "libusb-1.0 1.0.26",
+            .PACKAGE_STRING = "libusb-1.0 1.0.29",
             .PACKAGE_TARNAME = "libusb-1.0",
             .PACKAGE_URL = "http://libusb.info",
-            .PACKAGE_VERSION = "1.0.26",
+            .PACKAGE_VERSION = "1.0.29",
             .PLATFORM_POSIX = defineFromBool(is_posix),
             .PLATFORM_WINDOWS = defineFromBool(target.result.os.tag == .windows),
+            .@"PRINTF_FORMAT(a, b)" = .@"__attribute__ ((__format__ (__printf__, a, b)))",
             .STDC_HEADERS = 1,
-            .UMOCKDEV_HOTPLUG = null,
-            .USE_SYSTEM_LOGGING_FACILITY = null,
-            .VERSION = "1.0.26",
+            .VERSION = "1.0.29",
             ._GNU_SOURCE = 1,
-            ._WIN32_WINNT = null,
-            .@"inline" = null,
         });
         lib.addConfigHeader(config_h);
     }
-
     return lib;
 }
 
 const src = &.{
-    "libusb/core.c",
-    "libusb/descriptor.c",
-    "libusb/hotplug.c",
-    "libusb/io.c",
-    "libusb/strerror.c",
-    "libusb/sync.c",
+    "core.c",
+    "descriptor.c",
+    "hotplug.c",
+    "io.c",
+    "strerror.c",
+    "sync.c",
 };
 
 const posix_platform_src: []const []const u8 = &.{
-    "libusb/os/events_posix.c",
-    "libusb/os/threads_posix.c",
+    "events_posix.c",
+    "threads_posix.c",
 };
 
 const windows_platform_src: []const []const u8 = &.{
-    "libusb/os/events_windows.c",
-    "libusb/os/threads_windows.c",
+    "events_windows.c",
+    "threads_windows.c",
 };
 
 const darwin_src: []const []const u8 = &.{
-    "libusb/os/darwin_usb.c",
+    "darwin_usb.c",
 };
 
 const haiku_src: []const []const u8 = &.{
-    "libusb/os/haiku_pollfs.cpp",
-    "libusb/os/haiku_usb_backend.cpp",
-    "libusb/os/haiku_usb_raw.cpp",
+    "haiku_pollfs.cpp",
+    "haiku_usb_backend.cpp",
+    "haiku_usb_raw.cpp",
 };
 
 const linux_src: []const []const u8 = &.{
-    "libusb/os/linux_netlink.c",
-    "libusb/os/linux_usbfs.c",
+    "linux_netlink.c",
+    "linux_usbfs.c",
 };
 const linux_udev_src: []const []const u8 = &.{
-    "libusb/os/linux_udev.c",
+    "linux_udev.c",
 };
 
 const netbsd_src: []const []const u8 = &.{
-    "libusb/os/netbsd_usb.c",
+    "netbsd_usb.c",
 };
 
 const null_src: []const []const u8 = &.{
-    "libusb/os/null_usb.c",
+    "null_usb.c",
 };
 
 const openbsd_src: []const []const u8 = &.{
-    "libusb/os/openbsd_usb.c",
+    "openbsd_usb.c",
 };
 
 // sunos isn't supported by zig
 const sunos_src: []const []const u8 = &.{
-    "libusb/os/sunos_usb.c",
+    "sunos_usb.c",
 };
 
 const windows_src: []const []const u8 = &.{
-    "libusb/os/events_windows.c",
-    "libusb/os/threads_windows.c",
-    "libusb/os/windows_common.c",
-    "libusb/os/windows_usbdk.c",
-    "libusb/os/windows_winusb.c",
+    "events_windows.c",
+    "threads_windows.c",
+    "windows_common.c",
+    "windows_usbdk.c",
+    "windows_winusb.c",
 };
 
 pub fn targets(b: *Build) [17]std.Build.ResolvedTarget {

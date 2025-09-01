@@ -1,6 +1,12 @@
 .{
     .name = .libusb,
-    .version = "1.0.26",
+    .version = "1.0.29",
+    .dependencies = .{
+        .libusb = .{
+            .url = "https://github.com/libusb/libusb/archive/refs/tags/v1.0.29.zip",
+            .hash = "N-V-__8AAGn9GgCvOQYc8zh_T6CM7Rf1ab9lIiLhtZg_Dczu",
+        },
+    },
     .minimum_zig_version = "0.14.1",
     .paths = .{
         "README",
